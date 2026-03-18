@@ -15,6 +15,7 @@
 ```powershell
 C:\Users\jack\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv --system-site-packages
 & .\.venv\Scripts\python.exe -m pip install -r .\requirements.txt
+& .\.venv\Scripts\Activate.ps1
 ```
 
 ## scripts 目录脚本说明
@@ -63,6 +64,18 @@ C:\Users\jack\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv -
 & .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py --account-id 你的资金账号
 ```
 
+只查资产 + 当日委托，不查持仓（示例）：
+
+```powershell
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py --account-id 你的资金账号 --no-query-positions
+```
+
+仅查询可撤委托（示例）：
+
+```powershell
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py --account-id 你的资金账号 --cancelable-only
+```
+
 如果你的 `userdata_mini` 路径不是默认值，手动指定：
 
 ```powershell
@@ -80,6 +93,28 @@ C:\Users\jack\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv -
   --buy-volume 100 `
   --sell-volume 100 `
   --confirm `
+  --wait 10
+```
+
+异步撤单（两种方式）：
+
+1) 指定 order_id 撤单：
+
+```powershell
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py `
+  --account-id 你的资金账号 `
+  --confirm `
+  --cancel-order-id 123456 `
+  --wait 10
+```
+
+2) 从“可撤委托”中按时间倒序撤前 N 笔（示例撤 1 笔）：
+
+```powershell
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py `
+  --account-id 你的资金账号 `
+  --confirm `
+  --cancel-last 1 `
   --wait 10
 ```
 
