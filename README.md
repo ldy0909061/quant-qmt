@@ -85,15 +85,7 @@ C:\Users\jack\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv -
 真下单（需要显式加 `--confirm`；`FIX_PRICE` 还需要 `--price`）：
 
 ```powershell
-& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py `
-  --account-id 你的资金账号 `
-  --code 600000.SH `
-  --price-type FIX_PRICE `
-  --price 10.5 `
-  --buy-volume 100 `
-  --sell-volume 100 `
-  --confirm `
-  --wait 10
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py --account-id 你的资金账号 --code 600000.SH --price-type FIX_PRICE --price 10.5 --buy-volume 100 --sell-volume 100 --confirm --wait 10
 ```
 
 异步撤单（两种方式）：
@@ -101,21 +93,13 @@ C:\Users\jack\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv -
 1) 指定 order_id 撤单：
 
 ```powershell
-& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py `
-  --account-id 你的资金账号 `
-  --confirm `
-  --cancel-order-id 123456 `
-  --wait 10
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py --account-id 你的资金账号 --confirm --cancel-order-id 123456 --wait 10
 ```
 
 2) 从“可撤委托”中按时间倒序撤前 N 笔（示例撤 1 笔）：
 
 ```powershell
-& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py `
-  --account-id 你的资金账号 `
-  --confirm `
-  --cancel-last 1 `
-  --wait 10
+& .\.venv\Scripts\python.exe .\scripts\xttrader_simple_buy_sell.py --account-id 你的资金账号 --confirm --cancel-last 1 --wait 10
 ```
 
 打印 raw 对象属性（用于对照字段/排查返回结构）：

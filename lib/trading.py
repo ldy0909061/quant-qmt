@@ -29,32 +29,25 @@ class TraderService:
         self.session_id_candidates = session_id_candidates or list(range(100, 120))
         self.trader = None
 
-    def _make_callback_proxy(self):
-        from xtquant.xttrader import XtQuantTraderCallback
+        import types
 
-        outer = self
-        delegate = self.callback
+        original = getattr(self.callback, "on_disconnected", None)
 
-        class _CallbackProxy(XtQuantTraderCallback):
-            def __getattr__(self, name: str):
-                return getattr(delegate, name)
+        def _wrapped_on_disconnected(self_cb, *args, **kwargs):
+            try:
+                if callable(original):
+                    original()
+            finally:
+                self.trader = None
 
-            def on_disconnected(self):
-                try:
-                    fn = getattr(delegate, "on_disconnected", None)
-                    if callable(fn):
-                        fn()
-                finally:
-                    outer.trader = None
-
-        return _CallbackProxy()
+        # bind wrapper as instance method
+        self.callback.on_disconnected = types.MethodType(_wrapped_on_disconnected, self.callback)
 
     def create_trader(self, session_id: int):
         from xtquant.xttrader import XtQuantTrader
 
-        callback = self._make_callback_proxy()
         trader = XtQuantTrader(self.path, session_id)
-        trader.register_callback(callback)
+        trader.register_callback(self.callback)
         trader.start()
 
         connect_result = trader.connect()
@@ -171,6 +164,11 @@ class TraderService:
         for oid in order_ids:
             cancel_seq = trader.cancel_order_stock_async(self.account, oid)
             print("cancel_seq:", cancel_seq)
+            cache = getattr(self.callback, "cache", None)
+            if cache is not None:
+                fn = getattr(cache, "record_seq_sent", None)
+                if callable(fn):
+                    fn(cancel_seq, "cancel_order", account_id=self.account_id, order_id=oid)
 
     def order_async(
         self,
@@ -220,6 +218,11 @@ class TraderService:
                 order_remark="buy_once",
             )
             print("buy_seq:", buy_seq)
+            cache = getattr(self.callback, "cache", None)
+            if cache is not None:
+                fn = getattr(cache, "record_seq_sent", None)
+                if callable(fn):
+                    fn(buy_seq, "order", account_id=self.account_id, stock_code=code, order_remark="buy_once")
         if sell_volume > 0:
             sell_seq = trader.order_stock_async(
                 self.account,
@@ -232,5 +235,10 @@ class TraderService:
                 order_remark="sell_once",
             )
             print("sell_seq:", sell_seq)
+            cache = getattr(self.callback, "cache", None)
+            if cache is not None:
+                fn = getattr(cache, "record_seq_sent", None)
+                if callable(fn):
+                    fn(sell_seq, "order", account_id=self.account_id, stock_code=code, order_remark="sell_once")
 
         return 0
