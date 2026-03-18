@@ -1,6 +1,3 @@
-import sys
-
-
 def safe_repr(value: object, max_len: int = 400) -> str:
     try:
         s = repr(value)
@@ -167,4 +164,12 @@ def print_xtcancelerror(cancel_error) -> None:
         "cancel_error",
         cancel_error,
         ["account_type", "account_id", "order_id", "market", "order_sysid", "error_id", "error_msg"],
+    )
+
+
+def print_xtsmtappointmentresponse(response) -> None:
+    print_fields(
+        "smt_appointment_response",
+        response,
+        ["seq", "success", "msg", "apply_id"],
     )

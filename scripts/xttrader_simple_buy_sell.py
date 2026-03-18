@@ -7,15 +7,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from lib.callbacks import PrintCallback
-from lib.trading import (
-    cancel_orders_async,
-    collect_cancel_order_ids,
-    order_async,
-    query_asset,
-    query_orders,
-    query_positions,
-)
+from lib.trading import TraderService
 
 
 def main(argv: list[str]) -> int:
@@ -86,8 +78,6 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     try:
-        from xtquant.xttrader import XtQuantTrader
-        from xtquant.xttype import StockAccount
         from xtquant import xtconstant
     except Exception as e:
         print("导入 xtquant 失败：", e, file=sys.stderr)
@@ -98,32 +88,25 @@ def main(argv: list[str]) -> int:
         print("qmt-path 不存在：", str(qmt_path), file=sys.stderr)
         return 2
 
-    account = StockAccount(args.account_id, args.account_type)
+    svc = TraderService(qmt_path, args.account_id, account_type=args.account_type, session_id=args.session)
+    trader = svc.get_trader()
+    if trader is None:
+        return 2
 
-    trader = XtQuantTrader(str(qmt_path), args.session)
-    callback = PrintCallback()
-    trader.register_callback(callback)
-    trader.start()
-
-    connect_result = trader.connect()
-    print("connect_result:", connect_result)
-    subscribe_result = trader.subscribe(account)
-    print("subscribe_result:", subscribe_result)
-
-    query_asset(trader, account, args.dump_raw)
+    svc.query_asset(args.dump_raw)
 
     if args.query_positions:
-        query_positions(trader, account, args.dump_raw)
+        svc.query_positions(args.dump_raw)
     else:
         print("positions_skipped: True")
 
     if args.query_orders:
-        query_orders(trader, account, args.cancelable_only, args.dump_raw)
+        svc.query_orders(args.cancelable_only, args.dump_raw)
     else:
         print("orders_skipped: True")
 
-    cancel_order_ids = collect_cancel_order_ids(trader, account, list(args.cancel_order_id or []), args.cancel_last)
-    cancel_orders_async(trader, account, args.confirm, cancel_order_ids)
+    cancel_order_ids = svc.collect_cancel_order_ids(list(args.cancel_order_id or []), args.cancel_last)
+    svc.cancel_orders_async(args.confirm, cancel_order_ids)
 
     do_order = (args.buy_volume > 0) or (args.sell_volume > 0)
     if do_order:
@@ -132,9 +115,7 @@ def main(argv: list[str]) -> int:
             print("未知 price-type：", args.price_type, file=sys.stderr)
             trader.stop()
             return 2
-        order_rc = order_async(
-            trader,
-            account,
+        order_rc = svc.order_async(
             xtconstant,
             args.confirm,
             args.code,
@@ -144,13 +125,13 @@ def main(argv: list[str]) -> int:
             args.price,
         )
         if order_rc != 0:
-            trader.stop()
+            svc.stop()
             return order_rc
 
     if args.wait > 0:
         time.sleep(args.wait)
 
-    trader.stop()
+    svc.stop()
     return 0
 
 

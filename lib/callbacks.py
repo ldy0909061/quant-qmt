@@ -3,35 +3,23 @@ from xtquant.xttrader import XtQuantTraderCallback
 from .print_utils import (
     print_type,
     print_xtaccountstatus,
-    print_xtasset,
     print_xtcancelerror,
     print_xtcancelorderresponse,
     print_xtorder,
     print_xtordererror,
     print_xtorderresponse,
-    print_xtposition,
+    print_xtsmtappointmentresponse,
     print_xttrade,
 )
 
 
 class PrintCallback(XtQuantTraderCallback):
-    def on_connected(self):
-        print("on_connected")
-
     def on_disconnected(self):
         print("on_disconnected")
 
     def on_account_status(self, status):
         print_type("account_status", status)
         print_xtaccountstatus(status)
-
-    def on_stock_asset(self, asset):
-        print_type("asset", asset)
-        print_xtasset(asset)
-
-    def on_stock_position(self, position):
-        print_type("position", position)
-        print_xtposition(position)
 
     def on_stock_order(self, order):
         print_type("order", order)
@@ -52,6 +40,10 @@ class PrintCallback(XtQuantTraderCallback):
     def on_order_stock_async_response(self, response):
         print_type("order_response", response)
         print_xtorderresponse(response)
+
+    def on_smt_appointment_async_response(self, response):
+        print_type("smt_appointment_response", response)
+        print_xtsmtappointmentresponse(response)
 
     def on_cancel_order_stock_async_response(self, response):
         print_type("cancel_order_response", response)
