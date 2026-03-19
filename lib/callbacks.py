@@ -148,9 +148,9 @@ class CallbackCache:
                 raise RuntimeError("record_seq_sent duplicate seq task", {"key": key, "seq": seq, "kind": kind})
             task = OrderState(
                 seq=seq,
-                status=Status.CANCELING if kind == "cancel_order" else Status.SUBMITTING,
                 order_id=order_id,
                 stock_code=stock_code,
+                status=Status.ORDER_REPORTED_CANCEL if kind == "cancel_order" else Status.ORDER_WAIT_REPORTING,
                 created_ts=now,
                 update_ts=now,
                 is_canceling=(kind == "cancel_order"),
@@ -178,7 +178,7 @@ class CallbackCache:
             old_account_id = self.seq_task_account_id_by_key.get(key)
             if not isinstance(old_account_id, str) or not old_account_id:
                 raise RuntimeError("mark_seq_successful missing account_id mapping", {"key": key, "seq": seq, "kind": kind})
-            task.status = Status.CANCELED if kind == "cancel_order" else Status.SUBMITTED
+            task.status = Status.ORDER_CANCELED if kind == "cancel_order" else Status.ORDER_REPORTED
             task.update_ts = now
             if account_id is not None and account_id != old_account_id:
                 raise RuntimeError(
@@ -243,7 +243,7 @@ class CallbackCache:
             old_account_id = self.seq_task_account_id_by_key.get(key)
             if not isinstance(old_account_id, str) or not old_account_id:
                 raise RuntimeError("mark_seq_failed missing account_id mapping", {"key": key, "seq": seq, "kind": kind})
-            task.status = Status.CANCEL_FAILED if kind == "cancel_order" else Status.REJECTED
+            task.status = Status.ORDER_UNKNOWN if kind == "cancel_order" else Status.ORDER_JUNK
             task.update_ts = now
             if account_id is not None and account_id != old_account_id:
                 raise RuntimeError(
@@ -281,7 +281,7 @@ class CallbackCache:
                     "mark_failed_by_order_id kind mismatch",
                     {"expected_kind": kind, "actual_kind": key[0], "account_id": account_id, "order_id": order_id},
                 )
-            task.status = Status.CANCEL_FAILED if kind == "cancel_order" else Status.REJECTED
+            task.status = Status.ORDER_UNKNOWN if kind == "cancel_order" else Status.ORDER_JUNK
             task.update_ts = now
             if error_msg is not None:
                 task.error_msg = error_msg
