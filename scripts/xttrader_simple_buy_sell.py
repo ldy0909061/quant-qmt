@@ -116,7 +116,6 @@ def main(argv: list[str]) -> int:
             trader.stop()
             return 2
         order_rc = svc.order_async(
-            xtconstant,
             args.confirm,
             args.code,
             args.buy_volume,

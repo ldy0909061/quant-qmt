@@ -1,6 +1,12 @@
 import random
 import sys
+import types
 
+from xtquant import xtconstant
+from xtquant.xttrader import XtQuantTrader
+from xtquant.xttype import StockAccount
+
+from .callbacks import PrintCallback
 from .print_utils import dump_object, print_type, print_xtasset, print_xtorder, print_xtposition
 
 
@@ -15,21 +21,16 @@ class TraderService:
         session_id_candidates: list[int] | None = None,
     ):
         self.path = str(path)
-        from xtquant.xttype import StockAccount
 
         self.account_id = account_id
         self.account_type = account_type
         self.account = StockAccount(account_id, account_type)
         if callback is None:
-            from .callbacks import PrintCallback
-
             callback = PrintCallback()
         self.callback = callback
         self.session_id = session_id
         self.session_id_candidates = session_id_candidates or list(range(100, 120))
         self.trader = None
-
-        import types
 
         original = getattr(self.callback, "on_disconnected", None)
 
@@ -44,8 +45,6 @@ class TraderService:
         self.callback.on_disconnected = types.MethodType(_wrapped_on_disconnected, self.callback)
 
     def create_trader(self, session_id: int):
-        from xtquant.xttrader import XtQuantTrader
-
         trader = XtQuantTrader(self.path, session_id)
         trader.register_callback(self.callback)
         trader.start()
@@ -172,7 +171,6 @@ class TraderService:
 
     def order_async(
         self,
-        xtconstant,
         confirm: bool,
         code: str,
         buy_volume: int,
