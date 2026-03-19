@@ -1,7 +1,6 @@
 from xtquant.xttrader import XtQuantTraderCallback
 
 from collections import deque
-from dataclasses import dataclass
 import threading
 import time
 
@@ -16,21 +15,7 @@ from .print_utils import (
     print_xtsmtappointmentresponse,
     print_xttrade,
 )
-
-
-@dataclass(slots=True)
-class SeqTask:
-    seq: int
-    kind: str
-    status: str
-    created_ts: float
-    updated_ts: float
-    account_id: str
-    stock_code: str | None = None
-    order_id: int | None = None
-    order_remark: str | None = None
-    cancel_result: int | None = None
-    error_msg: str | None = None
+from .order_state import OrderState, Status
 
 
 class CallbackCache:
@@ -48,7 +33,8 @@ class CallbackCache:
         self.order_errors_by_order_id: dict[int, object] = {}
         self.cancel_errors_by_order_id: dict[int, object] = {}
         self.order_async_responses_by_seq: dict[int, object] = {}
-        self.seq_tasks_by_key: dict[tuple[str, int], SeqTask] = {}
+        self.seq_tasks_by_key: dict[tuple[str, int], OrderState] = {}
+        self.seq_task_account_id_by_key: dict[tuple[str, int], str] = {}
         self.seq_task_key_by_kind_account_order_id: dict[tuple[str, str, int], tuple[str, int]] = {}
         # TODO: cancel_order 复用 order_id（目标委托号）。如果对同一订单发起多次撤单，会产生多个 cancel seq。
         # TODO: 目前用 (kind, account_id, order_id) 做唯一索引，重复会直接抛异常；需要结合真实回调时序再验证是否合理。
@@ -60,11 +46,10 @@ class CallbackCache:
             raise RuntimeError("invalid kind", {"kind": kind})
         return (kind, seq)
 
-    def _add_task_indexes(self, key: tuple[str, int], task: SeqTask) -> None:
-        oid = task.order_id
-        if not isinstance(oid, int) or oid <= 0:
+    def _add_task_indexes(self, key: tuple[str, int], order_id: int | None, account_id: str) -> None:
+        if not isinstance(order_id, int) or order_id <= 0:
             return
-        idx = (task.kind, task.account_id, oid)
+        idx = (key[0], account_id, order_id)
         existing = self.seq_task_key_by_kind_account_order_id.get(idx)
         if existing is not None and existing != key:
             raise RuntimeError(
@@ -81,17 +66,20 @@ class CallbackCache:
         if existing == key:
             self.seq_task_key_by_kind_account_order_id.pop(idx, None)
 
-    def _post_update_identity_check(self, key: tuple[str, int], task: SeqTask, old_order_id: int | None, old_account_id: str | None) -> None:
-        if old_account_id != task.account_id:
+    def _post_update_identity_check(self, key: tuple[str, int], task: OrderState, old_order_id: int | None, old_account_id: str) -> None:
+        account_id = self.seq_task_account_id_by_key.get(key)
+        if not isinstance(account_id, str) or not account_id:
+            raise RuntimeError("seq task missing account_id mapping", {"key": key})
+        if old_account_id != account_id:
             raise RuntimeError(
                 "seq task changed account_id unexpectedly",
-                {"key": key, "old_account_id": old_account_id, "new_account_id": task.account_id},
+                {"key": key, "old_account_id": old_account_id, "new_account_id": account_id},
             )
 
         if old_order_id == task.order_id:
             return
         if old_order_id is None and isinstance(task.order_id, int) and task.order_id > 0:
-            self._add_task_indexes(key, task)
+            self._add_task_indexes(key, task.order_id, account_id)
             return
         raise RuntimeError(
             "seq task changed order_id unexpectedly",
@@ -154,23 +142,22 @@ class CallbackCache:
         if not isinstance(account_id, str) or not account_id:
             raise RuntimeError("record_seq_sent missing account_id", {"seq": seq, "kind": kind})
         key = self._seq_key(seq, kind)
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             if key in self.seq_tasks_by_key:
                 raise RuntimeError("record_seq_sent duplicate seq task", {"key": key, "seq": seq, "kind": kind})
-            task = SeqTask(
+            task = OrderState(
                 seq=seq,
-                kind=kind,
-                status="sent",
-                created_ts=now,
-                updated_ts=now,
-                account_id=account_id,
-                stock_code=stock_code,
+                status=Status.CANCELING if kind == "cancel_order" else Status.SUBMITTING,
                 order_id=order_id,
-                order_remark=order_remark,
+                stock_code=stock_code,
+                created_ts=now,
+                update_ts=now,
+                is_canceling=(kind == "cancel_order"),
             )
             self.seq_tasks_by_key[key] = task
-            self._add_task_indexes(key, task)
+            self.seq_task_account_id_by_key[key] = account_id
+            self._add_task_indexes(key, task.order_id, account_id)
 
     def mark_seq_successful(
         self,
@@ -182,26 +169,28 @@ class CallbackCache:
         order_remark: str | None = None,
     ) -> None:
         key = self._seq_key(seq, kind)
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             task = self.seq_tasks_by_key.get(key)
             if task is None:
                 raise RuntimeError("mark_seq_successful missing seq task", {"key": key, "seq": seq, "kind": kind})
             old_order_id = task.order_id
-            old_account_id = task.account_id
-            task.status = "successful"
-            task.updated_ts = now
-            if account_id is not None and account_id != task.account_id:
+            old_account_id = self.seq_task_account_id_by_key.get(key)
+            if not isinstance(old_account_id, str) or not old_account_id:
+                raise RuntimeError("mark_seq_successful missing account_id mapping", {"key": key, "seq": seq, "kind": kind})
+            task.status = Status.CANCELED if kind == "cancel_order" else Status.SUBMITTED
+            task.update_ts = now
+            if account_id is not None and account_id != old_account_id:
                 raise RuntimeError(
                     "mark_seq_successful account_id mismatch",
-                    {"key": key, "existing": task.account_id, "incoming": account_id},
+                    {"key": key, "existing": old_account_id, "incoming": account_id},
                 )
             if order_id is not None:
                 task.order_id = order_id
-            if cancel_result is not None:
-                task.cancel_result = cancel_result
-            if order_remark is not None:
-                task.order_remark = order_remark
+            if kind == "cancel_order":
+                task.is_canceling = False
+                if cancel_result == 0:
+                    task.is_canceld = True
             self._post_update_identity_check(key, task, old_order_id, old_account_id)
 
     def upsert_seq_task_order_response(
@@ -213,7 +202,7 @@ class CallbackCache:
         kind: str = "order",
     ) -> None:
         key = self._seq_key(seq, kind)
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             task = self.seq_tasks_by_key.get(key)
             if task is None:
@@ -223,17 +212,17 @@ class CallbackCache:
                 )
 
             old_order_id = task.order_id
-            old_account_id = task.account_id
-            task.updated_ts = now
-            if account_id is not None and account_id != task.account_id:
+            old_account_id = self.seq_task_account_id_by_key.get(key)
+            if not isinstance(old_account_id, str) or not old_account_id:
+                raise RuntimeError("upsert_seq_task_order_response missing account_id mapping", {"key": key, "seq": seq, "kind": kind})
+            task.update_ts = now
+            if account_id is not None and account_id != old_account_id:
                 raise RuntimeError(
                     "upsert_seq_task_order_response account_id mismatch",
-                    {"key": key, "existing": task.account_id, "incoming": account_id},
+                    {"key": key, "existing": old_account_id, "incoming": account_id},
                 )
             if order_id is not None:
                 task.order_id = order_id
-            if order_remark is not None:
-                task.order_remark = order_remark
             self._post_update_identity_check(key, task, old_order_id, old_account_id)
 
     def mark_seq_failed(
@@ -245,24 +234,26 @@ class CallbackCache:
         cancel_result: int | None = None,
     ) -> None:
         key = self._seq_key(seq, kind)
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             task = self.seq_tasks_by_key.get(key)
             if task is None:
                 raise RuntimeError("mark_seq_failed missing seq task", {"key": key, "seq": seq, "kind": kind})
             old_order_id = task.order_id
-            old_account_id = task.account_id
-            task.status = "failed"
-            task.updated_ts = now
-            if account_id is not None and account_id != task.account_id:
+            old_account_id = self.seq_task_account_id_by_key.get(key)
+            if not isinstance(old_account_id, str) or not old_account_id:
+                raise RuntimeError("mark_seq_failed missing account_id mapping", {"key": key, "seq": seq, "kind": kind})
+            task.status = Status.CANCEL_FAILED if kind == "cancel_order" else Status.REJECTED
+            task.update_ts = now
+            if account_id is not None and account_id != old_account_id:
                 raise RuntimeError(
                     "mark_seq_failed account_id mismatch",
-                    {"key": key, "existing": task.account_id, "incoming": account_id},
+                    {"key": key, "existing": old_account_id, "incoming": account_id},
                 )
-            if cancel_result is not None:
-                task.cancel_result = cancel_result
             if error_msg is not None:
                 task.error_msg = error_msg
+            if kind == "cancel_order":
+                task.is_canceling = False
             self._post_update_identity_check(key, task, old_order_id, old_account_id)
 
     def mark_failed_by_order_id(self, kind: str, account_id: str, order_id: int, error_msg: str | None = None) -> bool:
@@ -270,7 +261,7 @@ class CallbackCache:
             raise RuntimeError("mark_failed_by_order_id invalid account_id", {"account_id": account_id})
         if not isinstance(order_id, int) or order_id <= 0:
             raise RuntimeError("mark_failed_by_order_id invalid order_id", {"order_id": order_id})
-        now = time.time()
+        now = int(time.time())
         with self._lock:
             idx = (kind, account_id, order_id)
             key = self.seq_task_key_by_kind_account_order_id.get(idx)
@@ -285,19 +276,21 @@ class CallbackCache:
                     "mark_failed_by_order_id index corrupted",
                     {"account_id": account_id, "order_id": order_id, "key": key, "idx": idx},
                 )
-            if task.kind != kind:
+            if key[0] != kind:
                 raise RuntimeError(
                     "mark_failed_by_order_id kind mismatch",
-                    {"expected_kind": kind, "actual_kind": task.kind, "account_id": account_id, "order_id": order_id},
+                    {"expected_kind": kind, "actual_kind": key[0], "account_id": account_id, "order_id": order_id},
                 )
-            task.status = "failed"
-            task.updated_ts = now
+            task.status = Status.CANCEL_FAILED if kind == "cancel_order" else Status.REJECTED
+            task.update_ts = now
             if error_msg is not None:
                 task.error_msg = error_msg
+            if kind == "cancel_order":
+                task.is_canceling = False
             return True
         return True
 
-    def get_seq_task(self, seq: int, kind: str) -> SeqTask | None:
+    def get_seq_task(self, seq: int, kind: str) -> OrderState | None:
         key = self._seq_key(seq, kind)
         with self._lock:
             return self.seq_tasks_by_key.get(key)
